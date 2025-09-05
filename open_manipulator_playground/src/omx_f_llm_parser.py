@@ -1,6 +1,3 @@
-# omy_f3m_llm_parser.py
-# build: 2025-08-13-LLM-ONLY
-
 import re
 import json
 import time
@@ -15,18 +12,15 @@ from transformers import (
     GenerationConfig,
 )
 
-
 # --------------------
 # Settings
 # --------------------
 MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 MAX_NEW_TOKENS = 200
 
-# CUDA / dtype
 USE_CUDA = True
 PREFERRED_DTYPE = "fp16"   # "fp16" or "bf16"
 
-# Outlines (structured decoding, optional)
 USE_OUTLINES = False
 
 # --------------------
@@ -51,7 +45,6 @@ def _load_model_once():
     if _MODEL is not None and _TOKENIZER is not None:
         return
 
-    # --- Device / dtype ---
     has_cuda = torch.cuda.is_available()
     _DEVICE = "cuda" if (USE_CUDA and has_cuda) else "cpu"
     compute_dtype = None
@@ -65,7 +58,6 @@ def _load_model_once():
         except Exception:
             pass
 
-    # --- Tokenizer / Model ---
     _TOKENIZER = AutoTokenizer.from_pretrained(MODEL_ID)
     if _TOKENIZER.pad_token_id is None:
         _TOKENIZER.pad_token = _TOKENIZER.eos_token
@@ -80,7 +72,6 @@ def _load_model_once():
         _MODEL.to(dtype=compute_dtype)
         _MODEL.to("cuda")
 
-    # Deterministic decoding
     try:
         _MODEL.generation_config = GenerationConfig.from_model_config(_MODEL.config)
     except Exception:
@@ -91,7 +82,6 @@ def _load_model_once():
     _MODEL.generation_config.top_k = None
     _MODEL.generation_config.num_beams = 1
 
-    # --- Outlines wrapper (optional) ---
     _OUTLINES_LM = None
     if HAS_OUTLINES and USE_OUTLINES:
         try:
@@ -117,7 +107,7 @@ JSON_SCHEMA: Dict[str, Any] = {
     "properties": {
         "action":    {"type": ["string", "null"]},
         "direction": {"type": ["string", "null"]},
-        "value":     {"type": ["number", "string", "null"]},  # allow "keep"
+        "value":     {"type": ["number", "string", "null"]},
         "unit":      {"type": ["string", "null"]},
         "xyz": {
             "anyOf": [
@@ -143,62 +133,74 @@ Do not add explanations.
 RULES:
 - Copy numbers exactly.
 - If input has exactly 3 numbers (e.g. "go to x y z"), use action="move_xyz" and xyz=[x,y,z].
-- Angle units → action="rotate".
+- Angle units → action="rotate" (except when the verb is 'look', then use action="look").
 - Distance units → action="move".
-- Directions: left/right/up/down only.
-- "turn"/"rotate"/"spin" → action="rotate".
+- Directions: left/right/up/down/forward/backward only.
+- Synonyms:
+  * "back" → backward
+  * "forwards" → forward
+  * "look up" → {"action":"look","direction":"up"}
+  * "look down" → {"action":"look","direction":"down"}
+- "turn"/"rotate"/"spin" (any direction: left/right/up/down/forward/backward) → action="rotate".
+- "go"/"move"/"walk"/"step" → action="move".
 - "gripper open/close/reset" → action="gripper".
+- "look" (without turn/rotate) -> action="look" (only up/down).
+- "look left/right" → treat as rotate.
 - "home"/"initial pose"/"reset pose" → action="initialize".
 
 CONTINUOUS/STOP:
 - If the text indicates continuous motion, such as "keep", "keep going", "until stop", or "when I say stop",
-  then set value="keep" (a string), unit=null. Do NOT invent a numeric value.
-- If the user says exactly "stop" (or a clear stop intent), return:
+  then set value="keep" (a string), unit=null.
+- If the user says exactly "stop", return:
   {"action":"stop","direction":null,"value":null,"unit":null,"xyz":null}.
 
-DEFAULTS (rotate only):
-- If the input is a rotate command with a direction (left/right/up/down) but has no numeric amount
-  and is not a continuous command ("keep"), set value=10 and unit="degree".
-- Do NOT apply defaults to gripper/move/xyz or to any non-rotate action.
+DEFAULTS (rotate/look only):
+- If the input is a rotate or look command with a direction (left/right/up/down/forward/backward)
+  but has no numeric amount and is not a continuous command ("keep"), set value=10 and unit="degree".
 """
 
 FEW_SHOTS = [
     # ROTATE with explicit values
     ("turn right 45 degree", {"action":"rotate","direction":"right","value":45,"unit":"degree","xyz":None}),
     ("turn left 30 degree",  {"action":"rotate","direction":"left","value":30,"unit":"degree","xyz":None}),
-    ("rotate clockwise 90 degree", {"action":"rotate","direction":"right","value":90,"unit":"degree","xyz":None}),
-    ("rotate counterclockwise 60 degree", {"action":"rotate","direction":"left","value":60,"unit":"degree","xyz":None}),
+    ("turn up 15 degree",    {"action":"rotate","direction":"up","value":15,"unit":"degree","xyz":None}),
+    ("turn down 20 degree",  {"action":"rotate","direction":"down","value":20,"unit":"degree","xyz":None}),
 
-    # ROTATE with no value → defaults kick in (10 degree)
-    ("turn right", {"action":"rotate","direction":"right","value":10,"unit":"degree","xyz":None}),
-    ("turn left",  {"action":"rotate","direction":"left","value":10,"unit":"degree","xyz":None}),
-    ("rotate up",  {"action":"rotate","direction":"up","value":10,"unit":"degree","xyz":None}),
-    ("rotate down",{"action":"rotate","direction":"down","value":10,"unit":"degree","xyz":None}),
+    # LOOK (only up/down)
+    ("look up 20 degree",    {"action":"look","direction":"up","value":20,"unit":"degree","xyz":None}),
+    ("look down 15 degree",  {"action":"look","direction":"down","value":15,"unit":"degree","xyz":None}),
+    ("look up",              {"action":"look","direction":"up","value":10,"unit":"degree","xyz":None}),
+    ("look down",            {"action":"look","direction":"down","value":10,"unit":"degree","xyz":None}),
 
-    # MOVE
+    # ROTATE defaults (left/right) even if phrased as look
+    ("look left",  {"action":"rotate","direction":"left","value":10,"unit":"degree","xyz":None}),
+    ("look right", {"action":"rotate","direction":"right","value":10,"unit":"degree","xyz":None}),
+
+    # MOVE forward/backward
+    ("go forward 3 cm",   {"action":"move","direction":"forward","value":3,"unit":"cm","xyz":None}),
+    ("go backward 5 cm",  {"action":"move","direction":"backward","value":5,"unit":"cm","xyz":None}),
+    ("move back 2 cm",    {"action":"move","direction":"backward","value":2,"unit":"cm","xyz":None}),
+    ("step forwards 10 cm",{"action":"move","direction":"forward","value":10,"unit":"cm","xyz":None}),
+
+    # MOVE up/down/left/right
     ("move up 10 cm",        {"action":"move","direction":"up","value":10,"unit":"cm","xyz":None}),
     ("move down 5 cm",       {"action":"move","direction":"down","value":5,"unit":"cm","xyz":None}),
     ("move right 10 inch",   {"action":"move","direction":"right","value":10,"unit":"inch","xyz":None}),
-    ("go to right 10 mm",    {"action":"move","direction":"right","value":10,"unit":"mm","xyz":None}),
-
-    # ROTATE numeric up/down
-    ("rotate up 10 degree",   {"action":"rotate","direction":"up","value":10,"unit":"degree","xyz":None}),
-    ("rotate down 15 degree", {"action":"rotate","direction":"down","value":15,"unit":"degree","xyz":None}),
+    ("go to left 20 mm",     {"action":"move","direction":"left","value":20,"unit":"mm","xyz":None}),
 
     # CONTINUOUS
     ("turn right keep", {"action":"rotate","direction":"right","value":"keep","unit":None,"xyz":None}),
-    ("turn right keep when i say stop", {"action":"rotate","direction":"right","value":"keep","unit":None,"xyz":None}),
+    ("look left keep until stop", {"action":"rotate","direction":"left","value":"keep","unit":None,"xyz":None}),
 
     # STOP
     ("stop", {"action":"stop","direction":None,"value":None,"unit":None,"xyz":None}),
 
     # GRIPPER / INITIALIZE / XYZ
-    ("gripper open",             {"action":"gripper","direction":"open","value":None,"unit":None,"xyz":None}),
-    ("please gripper close",     {"action":"gripper","direction":"close","value":None,"unit":None,"xyz":None}),
-    ("reset gripper",            {"action":"gripper","direction":"reset","value":None,"unit":None,"xyz":None}),
-    ("go to initial pose",       {"action":"initialize","direction":None,"value":None,"unit":None,"xyz":None}),
-    ("reset position",           {"action":"initialize","direction":None,"value":None,"unit":None,"xyz":None}),
-    ("go to 0.3 0.2 0.1",        {"action":"move_xyz","direction":None,"value":None,"unit":None,"xyz":[0.3,0.2,0.1]}),
+    ("gripper open",         {"action":"gripper","direction":"open","value":None,"unit":None,"xyz":None}),
+    ("gripper close",        {"action":"gripper","direction":"close","value":None,"unit":None,"xyz":None}),
+    ("reset gripper",        {"action":"gripper","direction":"reset","value":None,"unit":None,"xyz":None}),
+    ("go to initial pose",   {"action":"initialize","direction":None,"value":None,"unit":None,"xyz":None}),
+    ("go to 0.3 0.2 0.1",    {"action":"move_xyz","direction":None,"value":None,"unit":None,"xyz":[0.3,0.2,0.1]}),
 ]
 
 def _extract_numbers(text: str) -> List[float]:
@@ -308,38 +310,12 @@ def vanilla_decode_json(messages: Union[str, List[Dict[str, str]]]) -> Optional[
         return None
 
 # --------------------
-# Defaults post-processing
-# --------------------
-def _apply_rotate_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
-    """If rotate+direction and no numeric value and not 'keep', set 10 degree."""
-    try:
-        if not isinstance(data, dict):
-            return data
-        if data.get("action") != "rotate":
-            return data
-        direction = (data.get("direction") or "").lower()
-        if direction not in ("left", "right", "up", "down"):
-            return data
-        val = data.get("value")
-        # don't override continuous mode
-        if isinstance(val, str) and val.strip().lower() == "keep":
-            return data
-        # treat empty string as missing
-        if val is None or (isinstance(val, str) and val.strip() == ""):
-            data["value"] = 10
-            data["unit"] = "degree"
-        return data
-    except Exception:
-        return data
-
-# --------------------
 # Public API
 # --------------------
 def parse_to_json(text: str) -> Dict[str, Any]:
     start = time.time()
     messages = build_chat_messages(text)
 
-    # Fast-path: plain "stop" (lowercase/trim)
     if text.strip().lower() == "stop":
         data = {"action":"stop","direction":None,"value":None,"unit":None,"xyz":None}
         print(f"✅ Parsed in {time.time()-start:.2f}s (fast stop)")
@@ -352,9 +328,6 @@ def parse_to_json(text: str) -> Dict[str, Any]:
         print(f"⚠️ No JSON parsed in {time.time()-start:.2f}s")
         return _empty_schema()
 
-    # apply rotate defaults (10 degree) only when appropriate
-    data = _apply_rotate_defaults(data)
-
     print(f"✅ Parsed in {time.time()-start:.2f}s")
     return data
 
@@ -363,13 +336,18 @@ def parse_to_json(text: str) -> Dict[str, Any]:
 # --------------------
 if __name__ == "__main__":
     tests = [
-        "turn right 45 degree",          # explicit
-        "turn left",                     # default 10 deg
-        "rotate up",                     # default 10 deg
-        "rotate down keep",              # keep (no default)
-        "go to 0.3 0.2 0.1",
+        "turn right 45 degree",
+        "turn up 15 degree",
+        "turn down 15 degree",
+        "look up 15 degree",
+        "look down",
+        "look right",
+        "look left",
+        "go forward 3 cm",
+        "go backward 5 cm",
+        "move back 2 cm",
+        "step forwards 10 cm",
         "gripper open",
-        "turn right keep when i say stop",
         "stop",
     ]
     for t in tests:
