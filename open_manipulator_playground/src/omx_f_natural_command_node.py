@@ -399,26 +399,14 @@ def _spin_worker(node, stop_evt):
 def main():
     rclpy.init()
     node = NaturalCommandNode()
-    stop_evt = threading.Event()
-    spin_thread = threading.Thread(target=_spin_worker, args=(node, stop_evt), daemon=True)
-    spin_thread.start()
-    print("💬 Enter a command (e.g., 'move forward 0.1 m', 'look down', 'rotate left 10 degree', 'gripper open') - Type 'exit' to quit")
+
     try:
-        while rclpy.ok():
-            text = input(">>> ").strip()
-            if text.lower() == "exit":
-                break
-            cmd = node.parse_command_with_llm(text)
-            if not cmd:
-                print("⚠️ Could not parse command.")
-                continue
-            print("📦 Parsed command:", json.dumps(cmd, ensure_ascii=False))
-            node.process_command(cmd)
+        rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        stop_evt.set()
-
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
