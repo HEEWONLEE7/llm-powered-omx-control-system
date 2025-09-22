@@ -1,5 +1,4 @@
-# natural_command_node.py — LLM-only JSON parser integration
-# 2025-09-05 — add Cartesian path (with start_state) & joint4 look-up/down correction
+# natural_command_node.py — Bridge 전용 (LLM 없음)
 
 # -------------------- import --------------------
 import re
@@ -17,14 +16,6 @@ from moveit_msgs.srv import GetPositionIK, GetCartesianPath
 from moveit_msgs.msg import RobotState
 import threading
 import numpy as np
-
-# LLM-only JSON parser
-try:
-    from omx_f_llm_parser import parse_to_json
-    HAS_LLM = True
-except Exception as e:
-    HAS_LLM = False
-    print(f"[LLM] import failed: {e}")
 
 
 # -------------------- constants --------------------
@@ -70,36 +61,13 @@ class NaturalCommandNode(Node):
         self.current_ee_pose.pose.position.z = self.current_z
         self.current_ee_pose.pose.orientation.w = 1.0
 
-        # Param
-        self.declare_parameter('use_llm', True)
-        self.use_llm = bool(self.get_parameter('use_llm').value) and HAS_LLM
-        if not HAS_LLM:
-            self.get_logger().warn("⚠️ LLM parser not available; commands will be ignored.")
-        else:
-            self.get_logger().info(f"✅ LLM parser ready (use_llm={self.use_llm})")
+        # Bridge 모드 → LLM 사용 안 함
+        self.get_logger().info("✅ Bridge mode active (no LLM parser, JSON directly expected)")
 
         # Continuous rotation state
         self._keep_timer = None
         self._keep_dir = None
         self._keep_w_rad_s = math.radians(KEEP_ROTATE_SPEED_DEG_S)
-
-    # ---- LLM wrapper ----
-    def parse_command_with_llm(self, text: str):
-        if not self.use_llm:
-            return None
-        try:
-            data = parse_to_json(text)
-            if not isinstance(data, dict):
-                return None
-            for k in ["action", "direction", "value", "unit", "xyz"]:
-                if k not in data:
-                    return None
-            if data["action"] is None:
-                return None
-            return data
-        except Exception as e:
-            self.get_logger().error(f"[LLM] parse failed: {e}")
-            return None
 
     # ---- execution entry ----
     def process_command(self, cmd):
@@ -202,7 +170,6 @@ class NaturalCommandNode(Node):
                         self.get_logger().warn(f"⚠️ Unsupported move direction: {direction}")
                     return
 
-
             self.get_logger().warn(f"⚠️ Unknown action: {action}")
 
         except Exception as e:
@@ -232,7 +199,6 @@ class NaturalCommandNode(Node):
             f"✅ Simplified move step={step_m:+.3f} m "
             f"(joint2={self.current_joint2_pos:.2f}, joint3={self.current_joint3_pos:.2f})"
         )
-
 
     # ---- Look up/down with simple joint4 formula ----
     def look_command(self, direction: str):
@@ -264,14 +230,6 @@ class NaturalCommandNode(Node):
         )
 
     # ---- utils ----
-    def quaternion_to_matrix(self, q):
-        w, x, y, z = q
-        return np.array([
-            [1 - 2*y*y - 2*z*z,   2*x*y - 2*z*w,     2*x*z + 2*y*w],
-            [2*x*y + 2*z*w,       1 - 2*x*x - 2*z*z, 2*y*z - 2*x*w],
-            [2*x*z - 2*y*w,       2*y*z + 2*x*w,     1 - 2*x*x - 2*y*y]
-        ])
-
     def get_delta(self, value, unit, radius):
         if unit and unit.lower() in ("degree", "deg"):
             return math.radians(float(value))
@@ -396,6 +354,7 @@ def _spin_worker(node, stop_evt):
     while rclpy.ok() and not stop_evt.is_set():
         rclpy.spin_once(node, timeout_sec=0.05)
 
+
 def main():
     rclpy.init()
     node = NaturalCommandNode()
@@ -407,6 +366,7 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()
