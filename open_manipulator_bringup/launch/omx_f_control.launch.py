@@ -14,18 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Author: Wonho Yun, Sungho Woo, Woojin Wie, Junha Cha
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.actions import RegisterEventHandler
-from launch.conditions import IfCondition
-from launch.conditions import UnlessCondition
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import Command
-from launch.substitutions import FindExecutable
-from launch.substitutions import LaunchConfiguration
-from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -100,23 +94,17 @@ def generate_launch_description():
             'omx_f.urdf.xacro',
         ]),
         ' ',
-        'prefix:=',
-        prefix,
+        'prefix:=', prefix,
         ' ',
-        'use_sim:=',
-        use_sim,
+        'use_sim:=', use_sim,
         ' ',
-        'use_fake_hardware:=',
-        use_fake_hardware,
+        'use_fake_hardware:=', use_fake_hardware,
         ' ',
-        'fake_sensor_commands:=',
-        fake_sensor_commands,
+        'fake_sensor_commands:=', fake_sensor_commands,
         ' ',
-        'port_name:=',
-        port_name,
+        'port_name:=', port_name,
         ' ',
-        'ros2_control_type:=',
-        ros2_control_type,
+        'ros2_control_type:=', ros2_control_type,
     ])
 
     # Paths for configuration files
@@ -152,11 +140,7 @@ def generate_launch_description():
     robot_controller_spawner = Node(
         package='controller_manager',
         executable='spawner',
-        arguments=[
-            'arm_controller',
-            'gripper_controller',
-            'joint_state_broadcaster',
-        ],
+        arguments=['arm_controller', 'gripper_controller', 'joint_state_broadcaster'],
         output='both',
         parameters=[{'robot_description': urdf_file}],
     )
@@ -166,18 +150,6 @@ def generate_launch_description():
         executable='robot_state_publisher',
         parameters=[{'robot_description': urdf_file, 'use_sim_time': use_sim}],
         output='both',
-    )
-
-    natural_command_node = Node(
-        executable=FindExecutable(name='python3'),
-        arguments=[
-            PathJoinSubstitution([
-                FindPackageShare('open_manipulator_playground'),
-                'src',
-                'natural_command_node.py'
-            ])
-        ],
-        output='screen'
     )
 
     joint_trajectory_executor = Node(
@@ -196,10 +168,22 @@ def generate_launch_description():
         condition=IfCondition(start_rviz),
     )
 
+    # === Bridge + NaturalCommandNode (Flask + ROS2) ===
+    bridge_node = Node(
+        executable=FindExecutable(name='python3'),
+        arguments=[PathJoinSubstitution([
+            FindPackageShare('open_manipulator_playground'),
+            'src',
+            'bridge_server.py',  # Flask + NaturalCommandNode 들어있는 파일
+        ])],
+        output='screen'
+    )
+
     # Event handlers to ensure order of execution
     delay_rviz_after_joint_state_broadcaster_spawner = RegisterEventHandler(
         event_handler=OnProcessExit(
-            target_action=robot_controller_spawner, on_exit=[rviz_node]
+            target_action=robot_controller_spawner,
+            on_exit=[rviz_node],
         )
     )
 
@@ -218,5 +202,6 @@ def generate_launch_description():
             robot_state_publisher_node,
             delay_rviz_after_joint_state_broadcaster_spawner,
             delay_joint_trajectory_executor_after_controllers,
+            bridge_node,  # 🚀 추가됨
         ]
     )
