@@ -69,6 +69,9 @@ class NaturalCommandNode(Node):
         self._keep_dir = None
         self._keep_w_rad_s = math.radians(KEEP_ROTATE_SPEED_DEG_S)
 
+        # ✅ Home pose (step2)
+        self.home_pose = [0.0, -1.57, 1.57, 1.57]
+
     # ---- execution entry ----
     def process_command(self, cmd):
         try:
@@ -87,6 +90,11 @@ class NaturalCommandNode(Node):
 
             if action == "initialize":
                 self.reset_pose()
+                return
+
+            # ✅ HOME pose
+            if action == "home":
+                self.go_home_pose()
                 return
 
             if action == "gripper":
@@ -155,9 +163,6 @@ class NaturalCommandNode(Node):
                     return
 
                 elif action == "move":
-                    direction = cmd.get("direction")
-                    value = cmd.get("value")
-                    unit = cmd.get("unit")
                     step = self.get_delta(value, unit, 1.0)
                     if step == 0.0:
                         self.get_logger().warn(f"⚠️ invalid or zero distance: {value} {unit}")
@@ -174,6 +179,26 @@ class NaturalCommandNode(Node):
 
         except Exception as e:
             self.get_logger().error(f"❌ process_command error: {e}")
+
+    # ---- Home pose ----
+    def go_home_pose(self):
+        traj = JointTrajectory()
+        traj.joint_names = ['joint1', 'joint2', 'joint3', 'joint4']
+
+        pt = JointTrajectoryPoint()
+        pt.positions = self.home_pose
+        pt.time_from_start.sec = 2
+
+        traj.points.append(pt)
+        self.arm_pub.publish(traj)
+
+        # 내부 상태 업데이트
+        (self.current_joint1_pos,
+         self.current_joint2_pos,
+         self.current_joint3_pos,
+         self.current_joint4_pos) = self.home_pose
+
+        self.get_logger().info("✅ Moved to home pose")
 
     # ---- Cartesian move (with start_state) ----
     def move_forward_backward(self, step_m):
@@ -349,12 +374,7 @@ class NaturalCommandNode(Node):
         self.arm_pub.publish(traj)
 
 
-# ---- background spin worker ----
-def _spin_worker(node, stop_evt):
-    while rclpy.ok() and not stop_evt.is_set():
-        rclpy.spin_once(node, timeout_sec=0.05)
-
-
+# ---- main ----
 def main():
     rclpy.init()
     node = NaturalCommandNode()
