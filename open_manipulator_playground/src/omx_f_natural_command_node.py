@@ -69,6 +69,12 @@ class NaturalCommandNode(Node):
         try:
             action = cmd.get("action")
 
+            # STOP 명령은 예외
+            if action != "stop":
+                if self._keep_timer is not None:
+                    self._stop_keep()
+                    self.get_logger().info("Keep mode auto-stopped before new command.")
+
             # STOP
             if action == "stop":
                 self._stop_keep()
@@ -122,7 +128,12 @@ class NaturalCommandNode(Node):
                     return
 
                 if action == "rotate":
-                    delta = self.get_delta(value, unit, L3)
+                    # 항상 degree 단위로 처리
+                    if unit and unit.lower() in ("degree", "deg"):
+                        delta = math.radians(float(value))
+                    else:
+                        delta = self.get_delta(value, unit, 1.0)
+
                     if direction == "left":
                         self.current_joint1_pos += delta
                     elif direction == "right":
@@ -134,6 +145,7 @@ class NaturalCommandNode(Node):
                     else:
                         self.get_logger().warn(f"Unsupported rotate direction: {direction}")
                         return
+
                     traj = JointTrajectory()
                     traj.joint_names = ['joint1', 'joint2', 'joint3', 'joint4']
                     pt = JointTrajectoryPoint()
