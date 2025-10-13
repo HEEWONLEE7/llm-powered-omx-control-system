@@ -1,6 +1,5 @@
 # natural_command_node.py — Bridge mode (no LLM inside)
 
-# -------------------- import --------------------
 import math
 import rclpy
 from rclpy.node import Node
@@ -11,7 +10,6 @@ from rclpy.action import ActionClient
 from geometry_msgs.msg import PoseStamped
 from moveit_msgs.srv import GetPositionIK, GetCartesianPath
 
-# -------------------- constants --------------------
 L2 = 0.128
 L3 = 0.124
 L_GRIPPER = 0.126
@@ -21,16 +19,13 @@ KEEP_TIMER_HZ = 20.0
 KEEP_DT = 1.0 / KEEP_TIMER_HZ
 
 
-# -------------------- node class --------------------
 class NaturalCommandNode(Node):
     def __init__(self):
         super().__init__('natural_command_node')
 
-        # ROS I/O
         self.arm_pub = self.create_publisher(JointTrajectory, '/arm_controller/joint_trajectory', 10)
         self.gripper_client = ActionClient(self, GripperCommand, '/gripper_controller/gripper_cmd')
 
-        # MoveIt services
         self.ik_client = self.create_client(GetPositionIK, '/compute_ik')
         self.cartesian_client = self.create_client(GetCartesianPath, '/compute_cartesian_path')
 
@@ -39,14 +34,12 @@ class NaturalCommandNode(Node):
         while not self.cartesian_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Waiting for /compute_cartesian_path service...')
 
-        # Joint state snapshots
         self.current_joint1_pos = 0.0
         self.current_joint2_pos = 0.0
         self.current_joint3_pos = 0.0
         self.current_joint4_pos = 0.0
         self.current_z = L2
 
-        # EE pose init
         self.current_ee_pose = PoseStamped()
         self.current_ee_pose.header.frame_id = "world"
         self.current_ee_pose.pose.position.x = 0.0
@@ -56,26 +49,21 @@ class NaturalCommandNode(Node):
 
         self.get_logger().info("Bridge mode active (no LLM parser, JSON directly expected)")
 
-        # Continuous rotation state
         self._keep_timer = None
         self._keep_dir = None
         self._keep_w_rad_s = math.radians(KEEP_ROTATE_SPEED_DEG_S)
 
-        # Home pose
         self.home_pose = [0.0, -1.57, 1.57, 1.57]
 
-    # ---- execution entry ----
     def process_command(self, cmd):
         try:
             action = cmd.get("action")
 
-            # STOP 명령은 예외
             if action != "stop":
                 if self._keep_timer is not None:
                     self._stop_keep()
                     self.get_logger().info("Keep mode auto-stopped before new command.")
 
-            # STOP
             if action == "stop":
                 self._stop_keep()
                 self.get_logger().info("Stopped continuous rotation.")
@@ -122,13 +110,11 @@ class NaturalCommandNode(Node):
                 value = cmd.get("value")
                 unit = cmd.get("unit")
 
-                # Continuous rotate
                 if (action == "rotate") and isinstance(value, str) and value.strip().lower() == "keep":
                     self._start_keep(direction)
                     return
 
                 if action == "rotate":
-                    # 항상 degree 단위로 처리
                     if unit and unit.lower() in ("degree", "deg"):
                         delta = math.radians(float(value))
                     else:
@@ -162,7 +148,6 @@ class NaturalCommandNode(Node):
                     return
 
                 elif action == "move":
-                    # Default to 5 cm if unit/value is missing
                     if value is None and unit is None:
                         value, unit = 5, "cm"
                         self.get_logger().info("No value/unit provided → defaulting to 5 cm")
@@ -184,7 +169,6 @@ class NaturalCommandNode(Node):
         except Exception as e:
             self.get_logger().error(f"process_command error: {e}")
 
-    # ---- Home pose ----
     def go_home_pose(self):
         traj = JointTrajectory()
         traj.joint_names = ['joint1', 'joint2', 'joint3', 'joint4']
@@ -199,17 +183,15 @@ class NaturalCommandNode(Node):
          self.current_joint3_pos,
          self.current_joint4_pos) = self.home_pose
 
-        # ✅ Close gripper when going to home pose
         goal = GripperCommand.Goal()
         goal.command = GripperCommandMsg()
-        goal.command.position = 0.0  # closed
+        goal.command.position = 0.0
         goal.command.max_effort = 1.0
         self.gripper_client.wait_for_server()
         self.gripper_client.send_goal_async(goal)
 
         self.get_logger().info("Moved to home pose (gripper closed)")
 
-    # ---- Cartesian move ----
     def move_forward_backward(self, step_m):
         delta_theta = step_m / L2
         self.current_joint2_pos += delta_theta
@@ -233,14 +215,13 @@ class NaturalCommandNode(Node):
             f"(joint2={self.current_joint2_pos:.2f}, joint3={self.current_joint3_pos:.2f})"
         )
 
-    # ---- Look command ----
     def look_command(self, direction: str):
         theta23 = self.current_joint2_pos + self.current_joint3_pos
 
         if direction == "up":
             self.current_joint4_pos = -theta23
         elif direction == "down":
-            self.current_joint4_pos = -theta23 + math.pi/2
+            self.current_joint4_pos = -theta23 + math.pi / 2
         else:
             self.get_logger().warn(f"Unsupported look direction: {direction}")
             return
@@ -262,7 +243,6 @@ class NaturalCommandNode(Node):
             f"Look {direction} executed (joint4={self.current_joint4_pos:.2f} rad)"
         )
 
-    # ---- utils ----
     def get_delta(self, value, unit, radius):
         if unit and unit.lower() in ("degree", "deg"):
             return math.radians(float(value))
@@ -337,7 +317,6 @@ class NaturalCommandNode(Node):
             code = res.error_code.val if res else -1
             self.get_logger().error(f"IK computation failed (code: {code})")
 
-    # ---- continuous rotate helpers ----
     def _start_keep(self, direction: str):
         d = (direction or "").lower()
         if d not in ("left", "right", "up", "down"):
@@ -382,11 +361,9 @@ class NaturalCommandNode(Node):
         self.arm_pub.publish(traj)
 
 
-# ---- main ----
 def main():
     rclpy.init()
     node = NaturalCommandNode()
-
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
