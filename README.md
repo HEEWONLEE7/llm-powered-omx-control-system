@@ -1,20 +1,53 @@
-# ROBOTIS OpenMANIPULATOR ROS 2 Packages
+# 🧠 Natural Language-Based OMX Control System
 
-This repository contains the official ROS 2 packages for the ROBOTIS OpenMANIPULATOR platform. These packages provide the necessary interfaces and tools to control the robot, integrate with its sensors, and develop physical AI applications, including those utilizing frameworks like LeRobot. For detailed usage instructions, please refer to the documentation below.
-  - [Documentation for OMY](https://ai.robotis.com/omy/introduction_omy.html)
-  - [Documentation for OpenMANIPULATOR-x](https://emanual.robotis.com/docs/en/platform/openmanipulator_x/overview/)
+## Project Overview
 
-To learn more about the Physical AI Tools, visit:
-  - [Physical AI Tools](https://github.com/ROBOTIS-GIT/physical_ai_tools)
+This project implements a natural language-based control system that allows the OMX robot to perform movements through intuitive text commands.
 
-To explore our open-source platforms in a simulation environment, visit:
-  - [Simulation Models](https://github.com/ROBOTIS-GIT/robotis_mujoco_menagerie)
+Using a rule-based architecture, the system analyzes user input and translates it into predefined motion sequences. This enables the robot to respond to human language in a structured and predictable way, reducing the need for traditional control interfaces such as joysticks or complex command panels.
 
-For usage instructions and demonstrations of the OpenMANIPULATOR, check out:
-  - [Tutorial Videos](https://www.youtube.com/@ROBOTISOpenSourceTeam)
+The primary focus of this project is to enhance human-robot interaction by enabling users to control the robot in a more natural and accessible manner, while maintaining reliability and safety in movement execution.
 
-To access datasets and pre-trained models for our open-source platforms, see:
-  - [AI Models & Datasets](https://huggingface.co/ROBOTIS)
 
-To use the Docker image for running ROS packages and Physical AI tools with the OpenMANIPULATOR, visit:
-  - [Docker Images](https://hub.docker.com/r/robotis/ros/tags)
+## Demo Video
+
+[![OMX Natural Language Control Demo](https://img.youtube.com/vi/JGMOZXorOjo/0.jpg)](https://youtu.be/JGMOZXorOjo?si=fsFUdSmBNe75S8lg)
+
+
+## Implementation & UI
+
+- ✅ OMX Control Code  
+  👉 [Implementation Repository](https://github.com/HEEWONLEE7/llm-powered-omx-control-system)
+
+- ✅ User Interface for OMX Control  
+  👉 [UI Repository](https://github.com/HEEWONLEE7/llm-robot-commander)
+
+
+## ROBOTIS OMX Related Resources
+
+- ROBOTIS OMX Official Documentation  
+  👉 https://ai.robotis.com/omx/introduction_omx.html
+
+- ROBOTIS OpenMANIPULATOR GitHub Repository  
+  👉 https://github.com/ROBOTIS-GIT/open_manipulator
+
+
+## How to Run
+
+To operate the system, both the robot control node and the UI must be launched separately.
+
+### 1️⃣ Launch OMX Robot Control (ROS 2)
+
+First, start the OMX robot control system by running the following command in the robot environment:
+
+```bash
+ros2 launch open_manipulator_bringup omx_f_control.launch.py
+```
+This initializes the OMX robot and prepares it to receive motion commands based on natural language input.
+
+### 2️⃣ Launch Control UI
+In another terminal, run the UI that handles natural language input and command transmission:
+``` bash
+python3 ws/llm-robot-commander/llm-robot-commander/control_ui.launch.py
+```
+This UI allows users to enter natural language commands, which are then processed and converted into executable motion instructions for the OMX robot.
